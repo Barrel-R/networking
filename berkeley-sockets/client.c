@@ -6,42 +6,68 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#define SERVER_PORT 8450
+#define BUFFER_SIZE 81
+
 int main(int argc, char **argv) {
-  struct sockaddr_in to;
-  in_addr_t addr = inet_addr(argv[1]);
-  char linha[81];
-  int err;
+  struct sockaddr_in server_addr;
+  char send_buffer[BUFFER_SIZE];
+  char recv_buffer[BUFFER_SIZE];
+  ssize_t n_sent, n_received;
+  socklen_t server_addr_len;
+  int sockfd;
 
-  if (argv[1] == NULL) {
-    puts("You must inform the address.");
-    return -1;
-  } else {
-    printf("Address: %s\n", argv[1]);
+  if (argc < 2) {
+    fprintf(stderr, "Usage: %s <server_ip_address>\n", argv[0]);
+    return 1;
   }
 
-  int sock, addrlen = sizeof(to);
+  sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
-  sock = socket(AF_INET, SOCK_DGRAM, 0);
+  memset(&server_addr, 0, sizeof(server_addr));
 
-  bzero((char *)&to, sizeof(to));
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  server_addr.sin_port = htons(SERVER_PORT);
 
-  to.sin_family = AF_INET;
-  to.sin_addr.s_addr = addr;
-  to.sin_port = htons(8450);
-
-  err = bind(sock, (struct sockaddr *)&to, addrlen);
-
-  if (err == -1) {
-    perror("bind");
-    return err;
+  if (inet_pton(AF_INET, argv[1], &server_addr.sin_addr) <= 0) {
+    perror("inet_pton failed");
+    return 1;
   }
 
-  do {
-    fgets(linha, 81, stdin);
-    sendto(sock, linha, strlen(linha) + 1, 0, (struct sockaddr *)&to, sizeof(to));
-  } while (strcmp(linha, "exit\n") != 0);
+  printf("Enter lines of text to send to server: (%s:%d). Type 'exit' to quit\n", argv[1], SERVER_PORT);
 
-  close(sock);
+  while (1) {
+    printf("> ");
+
+    if (fgets(send_buffer, BUFFER_SIZE, stdin) == NULL) {
+      break;
+    }
+
+    n_sent = sendto(sockfd, send_buffer, strlen(send_buffer), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
+
+    if (n_sent < 0) {
+      perror("sendto failed");
+      continue;
+    }
+
+    if (strcmp(send_buffer, "exit\n") == 0) {
+      printf("Exiting client\n");
+      break;
+    }
+
+    n_received = recvfrom(sockfd, recv_buffer, BUFFER_SIZE - 1, 0, NULL, NULL);
+
+    if (n_received < 0) {
+      perror("recvfrom failed");
+      continue;
+    }
+
+    recv_buffer[n_received] = '\0';
+    printf("Server replied: %s", recv_buffer);
+  }
+
+  close(sockfd);
 
   return 0;
 }
